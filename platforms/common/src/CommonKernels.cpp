@@ -47,13 +47,31 @@
 #include "SimTKOpenMMUtilities.h"
 #include "jama_eig.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <iterator>
 #include <set>
 
 using namespace OpenMM;
 using namespace std;
 using namespace Lepton;
+
+namespace {
+bool useSynchronousPythonForceExecution() {
+    const char* value = getenv("OPENMM_PYTHONFORCE_SYNC");
+    if (value == nullptr)
+        return false;
+    string token(value);
+    transform(
+        token.begin(),
+        token.end(),
+        token.begin(),
+        [](unsigned char c) { return static_cast<char>(tolower(c)); }
+    );
+    return !(token.empty() || token == "0" || token == "false" || token == "no" || token == "off");
+}
+}
 
 void CommonUpdateStateDataKernel::initialize(const System& system) {
     ContextSelector selector(cc);
@@ -4829,7 +4847,8 @@ void CommonCalcPythonForceKernel::initialize(const System& system, const PythonF
     addForcesKernel->addArg(cc.getLongForceBuffer());
     addForcesKernel->addArg(cc.getAtomIndexArray());
     forceGroupFlag = (1<<force.getForceGroup());
-    if (cc.getNumContexts() == 1) {
+    runSynchronously = (cc.getNumContexts() == 1 && useSynchronousPythonForceExecution());
+    if (cc.getNumContexts() == 1 && !runSynchronously) {
         cc.addPreComputation(new StartCalculationPreComputation(*this));
         cc.addPostComputation(new AddForcesPostComputation(*this));
     }
@@ -4837,10 +4856,17 @@ void CommonCalcPythonForceKernel::initialize(const System& system, const PythonF
 
 double CommonCalcPythonForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
     if (cc.getNumContexts() == 1) {
-        // This method does nothing.  The actual calculation is started by the pre-computation, continued on
-        // the worker thread, and finished by the post-computation.
+        if (!runSynchronously) {
+            // This method does nothing.  The actual calculation is started by the pre-computation, continued on
+            // the worker thread, and finished by the post-computation.
 
-        return 0;
+            return 0;
+        }
+
+        // Optional synchronous path for debugging interoperability with other
+        // forces that also use the work-thread pipeline.
+        executeOnWorkerThread(includeForces);
+        return addForces(includeForces, includeEnergy, -1);
     }
 
     // When using multiple GPUs, this method is itself called from the worker thread.

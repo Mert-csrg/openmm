@@ -1515,7 +1515,7 @@ private:
 class CommonCalcPythonForceKernel : public CalcPythonForceKernel {
 public:
     CommonCalcPythonForceKernel(std::string name, const Platform& platform, OpenMM::ContextImpl& contextImpl, ComputeContext& cc) :
-            CalcPythonForceKernel(name, platform), contextImpl(contextImpl), cc(cc) {
+            CalcPythonForceKernel(name, platform), contextImpl(contextImpl), cc(cc), runSynchronously(false) {
     }
     /**
      * Initialize the kernel.
@@ -1558,6 +1558,7 @@ private:
     std::vector<double> forcesVec;
     int forceGroupFlag;
     double energy;
+    bool runSynchronously;
     bool usePeriodic;
 };
 
